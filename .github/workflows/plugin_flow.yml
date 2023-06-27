@@ -1,0 +1,74 @@
+name: Plugin build test and release
+on:
+  # TODO this was copied from uplay plugin, rework pls to simplify.
+  # Don't have separate workflow file for release as we need to download artifact from build action.
+  # Or we can build it twice :shrug:
+  
+  workflow_run:
+    workflows: ["Update release version"]
+    types:
+      - completed
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master, dev ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macOS-latest, windows-latest]
+    steps:
+      
+    - name: Checkout code
+      uses: actions/checkout@v2
+      with:
+        repository: ${{ github.event.pull_request.head.repo.full_name }}
+        ref: ${{ github.event.pull_request.head.ref }}
+
+    - name: Display Python version
+      run: python -c "import sys; print(sys.version)"
+    
+    - name: Build plugin
+      uses: GOG-Nebula/action-build-plugin@feat/simple_composite_action
+      with:
+        target: ./build
+        requirements: requirements.txt
+    
+    # TODO unit tests run AND/OR integration test here -- try to run plugin from build artifact
+
+    - name: Create zip archive
+      shell: bash
+      env:
+        ZIP_NAME: test_plugin_${{ runner.os }}
+      run: |
+        7z a ${ZIP_NAME}.zip ./build/*
+
+    - name: get version
+      id: version
+      uses: notiz-dev/github-action-json-property@release
+      with: 
+        path: 'build/manifest.json'
+        prop_path: 'version'
+  
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: test_plugin_${{ runner.os }}
+        path: test_plugin_${{ runner.os }}.zip
+    
+  release:
+    needs: build  # synchroniusly after we have artifacts uploaded from win and mac
+    runs-on: ubuntu-22.04
+    steps:
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: ./artifacts
+
+    - name: Release plugin
+      uses: GOG-Nebula/action-release-plugin@v1
+      with:
+        assets_dir: ./artifacts
